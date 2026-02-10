@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""
-Play with Docker - Tam Otomatik Bot
-Docker Hub girisi → PWD oturum → Instance olusturma → Komut calistirma
-"""
-
 import time
-import json
 import os
 import traceback
 from datetime import datetime
@@ -23,43 +17,83 @@ from selenium.common.exceptions import (
     NoSuchElementException,
     ElementClickInterceptedException,
     StaleElementReferenceException,
-    WebDriverException
 )
 
 try:
     from webdriver_manager.chrome import ChromeDriverManager
-    USE_WDM = True
+    HAS_WDM = True
 except ImportError:
-    USE_WDM = False
+    HAS_WDM = False
 
 
 class PWDBot:
-    """Play with Docker otomasyonu icin ana sinif."""
 
     PWD_URL = "https://labs.play-with-docker.com/"
-    DOCKER_LOGIN_URL = "https://login.docker.com"
 
-    def __init__(self, headless=True, timeout=40, screenshot_dir="screenshots"):
+    def __init__(self, headless=True, timeout=40):
         self.headless = headless
         self.timeout = timeout
-        self.screenshot_dir = screenshot_dir
         self.driver = None
         self.wait = None
         self.short_wait = None
-        self.account_label = ""
+        self.label = ""
+        os.makedirs("screenshots", exist_ok=True)
 
-        os.makedirs(self.screenshot_dir, exist_ok=True)
+    # ── yardimci ──────────────────────────────────────────
 
-    # ------------------------------------------------------------------ #
-    #  BROWSER KURULUMU
-    # ------------------------------------------------------------------ #
-    def _setup_driver(self):
-        """Chrome WebDriver'i yapilandir ve baslat."""
+    def log(self, msg):
+        ts = datetime.now().strftime("%H:%M:%S")
+        print(f"  [{ts}][{self.label}] {msg}")
+
+    def snap(self, name):
+        try:
+            p = f"screenshots/{self.label}_{name}_{int(time.time())}.png"
+            self.driver.save_screenshot(p)
+        except Exception:
+            pass
+
+    def safe_click(self, el):
+        try:
+            el.click()
+        except ElementClickInterceptedException:
+            self.driver.execute_script("arguments[0].click();", el)
+
+    def find_click(self, sels, desc="element"):
+        for by, sel in sels:
+            try:
+                el = self.short_wait.until(
+                    EC.element_to_be_clickable((by, sel))
+                )
+                self.safe_click(el)
+                self.log(f"  {desc} tiklandi")
+                return True
+            except (TimeoutException, NoSuchElementException):
+                continue
+        return False
+
+    def find_type(self, sels, text, desc="input"):
+        for by, sel in sels:
+            try:
+                el = self.short_wait.until(
+                    EC.presence_of_element_located((by, sel))
+                )
+                el.clear()
+                time.sleep(0.3)
+                for ch in text:
+                    el.send_keys(ch)
+                    time.sleep(0.04)
+                self.log(f"  {desc} yazildi")
+                return True
+            except (TimeoutException, NoSuchElementException):
+                continue
+        return False
+
+    # ── tarayici ──────────────────────────────────────────
+
+    def setup_driver(self):
         opts = Options()
-
         if self.headless:
             opts.add_argument("--headless=new")
-
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
         opts.add_argument("--disable-gpu")
@@ -72,155 +106,58 @@ class PWDBot:
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/125.0.0.0 Safari/537.36"
         )
-
-        # Anti-bot algilama onlemleri
         opts.add_experimental_option("excludeSwitches", ["enable-automation"])
         opts.add_experimental_option("useAutomationExtension", False)
 
-        if USE_WDM:
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=opts)
+        if HAS_WDM:
+            svc = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=svc, options=opts)
         else:
             self.driver = webdriver.Chrome(options=opts)
 
-        # navigator.webdriver flag'ini gizle
         self.driver.execute_cdp_cmd(
             "Page.addScriptToEvaluateOnNewDocument",
-            {
-                "source": """
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                """
-            },
+            {"source": "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"},
         )
-
         self.wait = WebDriverWait(
-            self.driver,
-            self.timeout,
+            self.driver, self.timeout,
             ignored_exceptions=[StaleElementReferenceException],
         )
-        self.short_wait = WebDriverWait(self.driver, 10)
+        self.short_wait = WebDriverWait(self.driver, 12)
+        self.log("Chrome baslatildi")
 
-        self._log("Chrome baslatildi")
+    # ── adim 1 : pwd ana sayfa ────────────────────────────
 
-    # ------------------------------------------------------------------ #
-    #  YARDIMCI FONKSIYONLAR
-    # ------------------------------------------------------------------ #
-    def _log(self, msg):
-        ts = datetime.now().strftime("%H:%M:%S")
-        label = f"[{self.account_label}]" if self.account_label else ""
-        print(f"[{ts}]{label} {msg}")
-
-    def _screenshot(self, name):
-        try:
-            path = os.path.join(
-                self.screenshot_dir,
-                f"{self.account_label}_{name}_{int(time.time())}.png",
-            )
-            self.driver.save_screenshot(path)
-            self._log(f"  Screenshot: {path}")
-        except Exception:
-            pass
-
-    def _safe_click(self, element):
-        """Tiklanamayan elemanlari JavaScript ile tikla."""
-        try:
-            element.click()
-        except ElementClickInterceptedException:
-            self.driver.execute_script("arguments[0].click();", element)
-
-    def _find_and_click(self, selectors, description="element"):
-        """
-        Birden fazla CSS/XPath selektor dene, ilk bulunani tikla.
-        selectors: [(By.XXX, "selector"), ...]
-        """
-        for by, selector in selectors:
-            try:
-                el = self.short_wait.until(
-                    EC.element_to_be_clickable((by, selector))
-                )
-                self._safe_click(el)
-                self._log(f"  {description} tiklandi: {selector}")
-                return True
-            except (TimeoutException, NoSuchElementException):
-                continue
-        return False
-
-    def _find_and_type(self, selectors, text, description="input"):
-        """
-        Birden fazla selektor dene, ilk bulunana yaz.
-        """
-        for by, selector in selectors:
-            try:
-                el = self.short_wait.until(
-                    EC.presence_of_element_located((by, selector))
-                )
-                el.clear()
-                time.sleep(0.3)
-                # Karakter karakter yaz (bot algilamaya karsi)
-                for ch in text:
-                    el.send_keys(ch)
-                    time.sleep(0.05)
-                self._log(f"  {description} yazildi: {selector}")
-                return True
-            except (TimeoutException, NoSuchElementException):
-                continue
-        return False
-
-    def _wait_for_any(self, selectors, timeout=None):
-        """Verilen selektorlerden herhangi birini bekle."""
-        t = timeout or self.timeout
-        end = time.time() + t
-        while time.time() < end:
-            for by, selector in selectors:
-                try:
-                    el = self.driver.find_element(by, selector)
-                    if el.is_displayed():
-                        return el
-                except NoSuchElementException:
-                    continue
-            time.sleep(0.5)
-        return None
-
-    # ------------------------------------------------------------------ #
-    #  ADIM 1: PWD ANA SAYFASINA GIT
-    # ------------------------------------------------------------------ #
-    def _navigate_to_pwd(self):
-        self._log("PWD ana sayfasina gidiliyor...")
+    def step1_goto_pwd(self):
+        self.log("PWD sayfasina gidiliyor...")
         self.driver.get(self.PWD_URL)
-        time.sleep(4)
-        self._screenshot("01_pwd_anasayfa")
+        time.sleep(5)
+        self.snap("01_anasayfa")
 
-    # ------------------------------------------------------------------ #
-    #  ADIM 2: LOGIN BUTONUNA TIKLA
-    # ------------------------------------------------------------------ #
-    def _click_login(self):
-        self._log("Login butonu araniyor...")
-        login_selectors = [
+    # ── adim 2 : login tikla ─────────────────────────────
+
+    def step2_click_login(self):
+        self.log("Login butonu araniyor...")
+        sels = [
             (By.XPATH, "//button[contains(translate(text(),'LOGIN','login'),'login')]"),
             (By.XPATH, "//a[contains(translate(text(),'LOGIN','login'),'login')]"),
             (By.XPATH, "//*[contains(@class,'login')]"),
             (By.XPATH, "//button[contains(text(),'Log in')]"),
             (By.XPATH, "//a[contains(text(),'Log in')]"),
             (By.CSS_SELECTOR, "button.btn-primary"),
-            (By.CSS_SELECTOR, "#btnGroupDrop"),
             (By.XPATH, "//button[contains(@class,'btn')]"),
         ]
-
-        if not self._find_and_click(login_selectors, "Login butonu"):
-            self._screenshot("02_login_bulunamadi")
+        if not self.find_click(sels, "Login"):
+            self.snap("02_login_yok")
             raise Exception("Login butonu bulunamadi!")
-
         time.sleep(3)
-        self._screenshot("02_login_sonrasi")
+        self.snap("02_login_ok")
 
-    # ------------------------------------------------------------------ #
-    #  ADIM 3: DOCKER PROVIDER BUTONUNA TIKLA
-    # ------------------------------------------------------------------ #
-    def _click_docker_provider(self):
-        self._log("Docker provider butonu araniyor...")
-        docker_selectors = [
+    # ── adim 3 : docker provider tikla ───────────────────
+
+    def step3_click_docker(self):
+        self.log("Docker butonu araniyor...")
+        sels = [
             (By.XPATH, "//a[contains(translate(text(),'DOCKER','docker'),'docker')]"),
             (By.XPATH, "//button[contains(translate(text(),'DOCKER','docker'),'docker')]"),
             (By.XPATH, "//*[contains(@class,'docker')]"),
@@ -229,40 +166,33 @@ class PWDBot:
             (By.CSS_SELECTOR, ".providers-list a"),
             (By.XPATH, "//div[contains(@class,'modal')]//a"),
         ]
+        if not self.find_click(sels, "Docker"):
+            self.snap("03_docker_yok")
+            raise Exception("Docker butonu bulunamadi!")
+        time.sleep(6)
+        self.snap("03_docker_ok")
 
-        if not self._find_and_click(docker_selectors, "Docker butonu"):
-            self._screenshot("03_docker_bulunamadi")
-            raise Exception("Docker provider butonu bulunamadi!")
+    # ── adim 4 : docker hub giris ────────────────────────
 
-        time.sleep(5)
-        self._screenshot("03_docker_sonrasi")
+    def step4_docker_login(self, email, password):
+        self.log("Docker Hub girisi...")
 
-    # ------------------------------------------------------------------ #
-    #  ADIM 4: DOCKER HUB GIRIS SAYFASI
-    # ------------------------------------------------------------------ #
-    def _handle_docker_login(self, email, password):
-        self._log("Docker Hub giris sayfasi islemleri...")
-
-        # Yeni sekmeye gec (Docker Hub login yeni sekmede acilir)
-        original_window = self.driver.current_window_handle
-        all_windows = self.driver.window_handles
-
-        if len(all_windows) > 1:
-            for w in all_windows:
-                if w != original_window:
+        original = self.driver.current_window_handle
+        all_wins = self.driver.window_handles
+        if len(all_wins) > 1:
+            for w in all_wins:
+                if w != original:
                     self.driver.switch_to.window(w)
                     break
-            self._log("  Yeni sekmeye gecildi")
-        else:
-            self._log("  Ayni sekmede devam ediliyor")
+            self.log("  Yeni sekmeye gecildi")
 
-        time.sleep(4)
-        self._screenshot("04_docker_login_sayfasi")
-        self._log(f"  Suanki URL: {self.driver.current_url}")
+        time.sleep(5)
+        self.snap("04_login_sayfa")
+        self.log(f"  URL: {self.driver.current_url}")
 
-        # ---- EMAIL / USERNAME GIRISI ----
-        self._log("  Email/username yaziliyor...")
-        email_selectors = [
+        # --- email ---
+        self.log("  Email yaziliyor...")
+        email_sels = [
             (By.ID, "username"),
             (By.NAME, "username"),
             (By.ID, "email"),
@@ -271,238 +201,234 @@ class PWDBot:
             (By.CSS_SELECTOR, "input[type='text']"),
             (By.CSS_SELECTOR, "input[name='username']"),
             (By.CSS_SELECTOR, "input[autocomplete='username']"),
-            (By.XPATH, "//input[@id='username']"),
-            (By.XPATH, "//input[@placeholder]"),
         ]
-
-        if not self._find_and_type(email_selectors, email, "Email"):
-            self._screenshot("04_email_bulunamadi")
-            raise Exception("Email input alani bulunamadi!")
-
+        if not self.find_type(email_sels, email, "Email"):
+            self.snap("04_email_yok")
+            raise Exception("Email alani bulunamadi!")
         time.sleep(1)
 
-        # ---- CONTINUE BUTONUNA TIKLA ----
-        self._log("  Continue butonuna tiklaniyor...")
-        continue_selectors = [
+        # --- continue ---
+        self.log("  Continue tiklaniyor...")
+        cont_sels = [
             (By.XPATH, "//button[contains(text(),'Continue')]"),
             (By.XPATH, "//button[contains(text(),'continue')]"),
-            (By.XPATH, "//button[contains(text(),'Devam')]"),
             (By.XPATH, "//button[@type='submit']"),
-            (By.XPATH, "//input[@type='submit']"),
             (By.CSS_SELECTOR, "button[type='submit']"),
-            (By.CSS_SELECTOR, "button.btn-primary"),
-            (By.CSS_SELECTOR, "#continue-button"),
-            (By.XPATH, "//button[contains(@class,'continue')]"),
-            (By.XPATH, "//button[contains(@data-testid,'continue')]"),
+            (By.CSS_SELECTOR, "button[data-testid='continue-button']"),
         ]
-
-        if not self._find_and_click(continue_selectors, "Continue butonu"):
-            self._screenshot("04_continue_bulunamadi")
+        if not self.find_click(cont_sels, "Continue"):
+            self.snap("04_continue_yok")
             raise Exception("Continue butonu bulunamadi!")
+        time.sleep(6)
+        self.snap("05_sifre_sayfa")
 
-        time.sleep(5)
-        self._screenshot("05_password_sayfasi")
-        self._log(f"  Suanki URL: {self.driver.current_url}")
-
-        # ---- SIFRE GIRISI ----
-        self._log("  Sifre yaziliyor...")
-        password_selectors = [
+        # --- password ---
+        self.log("  Sifre yaziliyor...")
+        pw_sels = [
             (By.ID, "password"),
             (By.NAME, "password"),
             (By.CSS_SELECTOR, "input[type='password']"),
-            (By.CSS_SELECTOR, "input[name='password']"),
             (By.XPATH, "//input[@type='password']"),
-            (By.XPATH, "//input[@id='password']"),
         ]
-
-        # Sayfanin tamamen yuklenmesini bekle
-        for attempt in range(3):
-            if self._find_and_type(password_selectors, password, "Password"):
+        for attempt in range(4):
+            if self.find_type(pw_sels, password, "Password"):
                 break
-            self._log(f"  Sifre alani bekleniyor... deneme {attempt+1}")
+            self.log(f"  Sifre alani bekleniyor... {attempt+1}")
             time.sleep(3)
         else:
-            self._screenshot("05_password_bulunamadi")
-            raise Exception("Password input alani bulunamadi!")
-
+            self.snap("05_sifre_yok")
+            raise Exception("Sifre alani bulunamadi!")
         time.sleep(1)
 
-        # ---- SIGN IN / LOGIN BUTONUNA TIKLA ----
-        self._log("  Sign In butonuna tiklaniyor...")
-        signin_selectors = [
+        # --- sign in ---
+        self.log("  Sign In tiklaniyor...")
+        sign_sels = [
             (By.XPATH, "//button[contains(text(),'Sign In')]"),
             (By.XPATH, "//button[contains(text(),'Sign in')]"),
             (By.XPATH, "//button[contains(text(),'Log In')]"),
             (By.XPATH, "//button[contains(text(),'Log in')]"),
             (By.XPATH, "//button[contains(text(),'Login')]"),
-            (By.XPATH, "//button[contains(text(),'Giris')]"),
             (By.XPATH, "//button[@type='submit']"),
             (By.CSS_SELECTOR, "button[type='submit']"),
-            (By.CSS_SELECTOR, "button[data-testid='sign-in-button']"),
-            (By.XPATH, "//button[contains(@class,'sign-in')]"),
-            (By.CSS_SELECTOR, "#sign-in-button"),
-            (By.XPATH, "//input[@type='submit']"),
             (By.XPATH, "(//button[@type='submit'])[last()]"),
         ]
-
-        if not self._find_and_click(signin_selectors, "Sign In butonu"):
-            # Fallback: Enter tusuna bas
-            self._log("  Sign In bulunamadi, Enter tusu deneniyor...")
+        if not self.find_click(sign_sels, "Sign In"):
+            self.log("  Enter tusu deneniyor...")
             try:
-                pwd_el = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
-                pwd_el.send_keys(Keys.RETURN)
+                p = self.driver.find_element(By.CSS_SELECTOR, "input[type='password']")
+                p.send_keys(Keys.RETURN)
             except Exception:
-                self._screenshot("05_signin_bulunamadi")
-                raise Exception("Sign In butonu bulunamadi!")
+                raise Exception("Sign In bulunamadi!")
 
-        time.sleep(8)
-        self._screenshot("06_giris_sonrasi")
+        time.sleep(10)
+        self.snap("06_giris_ok")
 
-        # Authorize/Grant sayfasi varsa onayla
-        self._handle_authorize_page()
-
-        # PWD sekmesine geri don
-        if len(self.driver.window_handles) > 1:
-            self.driver.switch_to.window(original_window)
-            self._log("  PWD sekmesine geri donuldu")
-            time.sleep(3)
-
-        self._screenshot("07_pwd_giris_yapildi")
-
-    # ------------------------------------------------------------------ #
-    #  ADIM 4.5: AUTHORIZE SAYFASI (varsa)
-    # ------------------------------------------------------------------ #
-    def _handle_authorize_page(self):
-        """Docker Hub OAuth authorize sayfasi cikarsa onayla."""
-        authorize_selectors = [
+        # --- authorize (varsa) ---
+        auth_sels = [
             (By.XPATH, "//button[contains(text(),'Authorize')]"),
             (By.XPATH, "//button[contains(text(),'Accept')]"),
             (By.XPATH, "//button[contains(text(),'Allow')]"),
-            (By.XPATH, "//button[contains(text(),'Grant')]"),
-            (By.XPATH, "//input[@value='Authorize']"),
         ]
-        if self._find_and_click(authorize_selectors, "Authorize butonu"):
-            self._log("  Authorize sayfasi onaylandi")
+        if self.find_click(auth_sels, "Authorize"):
             time.sleep(5)
 
-    # ------------------------------------------------------------------ #
-    #  ADIM 5: START BUTONUNA TIKLA
-    # ------------------------------------------------------------------ #
-    def _click_start(self):
-        self._log("Start butonu araniyor...")
-        time.sleep(3)
-        self._screenshot("08_start_oncesi")
+        # --- pwd sekmesine don ---
+        if len(self.driver.window_handles) > 1:
+            self.driver.switch_to.window(original)
+            self.log("  PWD sekmesine donuldu")
+            time.sleep(4)
 
-        start_selectors = [
-            (By.XPATH, "//button[contains(text(),'Start')]"),
-            (By.XPATH, "//a[contains(text(),'Start')]"),
+        self.snap("07_pwd_ok")
+
+    # ── adim 5 : start tikla ─────────────────────────────
+
+    def step5_click_start(self):
+        self.log("Start butonu araniyor...")
+        time.sleep(3)
+
+        start_sels = [
+            (By.XPATH, "//button[contains(translate(text(),'START','start'),'start')]"),
+            (By.XPATH, "//a[contains(translate(text(),'START','start'),'start')]"),
             (By.XPATH, "//*[contains(text(),'Start')]"),
             (By.CSS_SELECTOR, "button.btn-primary"),
-            (By.CSS_SELECTOR, "#btnGroupDrop"),
-            (By.XPATH, "//button[contains(@class,'btn-success')]"),
-            (By.XPATH, "//button[contains(translate(text(),'START','start'),'start')]"),
+            (By.CSS_SELECTOR, "button.btn-success"),
         ]
 
-        # Birden fazla deneme
-        for attempt in range(5):
-            if self._find_and_click(start_selectors, "Start butonu"):
-                time.sleep(5)
-                self._screenshot("08_start_sonrasi")
+        for attempt in range(6):
+            if self.find_click(start_sels, "Start"):
+                time.sleep(6)
+                self.snap("08_start_ok")
                 return
-            self._log(f"  Start butonu bekleniyor... deneme {attempt+1}")
+            try:
+                self.driver.find_element(
+                    By.XPATH,
+                    "//*[contains(text(),'ADD NEW INSTANCE') or "
+                    "contains(text(),'Add New Instance') or "
+                    "contains(text(),'Add new instance')]",
+                )
+                self.log("  Session zaten aktif!")
+                return
+            except NoSuchElementException:
+                pass
+            self.log(f"  Start bekleniyor... {attempt+1}")
             time.sleep(3)
 
-            # Belki zaten session sayfasindayiz
-            if self._check_if_session_active():
-                self._log("  Zaten session aktif!")
-                return
-
-        self._screenshot("08_start_bulunamadi")
+        self.snap("08_start_yok")
         raise Exception("Start butonu bulunamadi!")
 
-    def _check_if_session_active(self):
-        """Session sayfasinda mi kontrol et."""
-        try:
-            self.driver.find_element(
-                By.XPATH,
-                "//*[contains(text(),'ADD NEW INSTANCE') or contains(text(),'Add New Instance')]"
-            )
-            return True
-        except NoSuchElementException:
-            return False
+    # ── adim 6 : add new instance ────────────────────────
 
-    # ------------------------------------------------------------------ #
-    #  ADIM 6: ADD NEW INSTANCE
-    # ------------------------------------------------------------------ #
-    def _add_instance(self):
-        self._log("Add New Instance butonu araniyor...")
+    def step6_add_instance(self):
+        self.log("Add New Instance araniyor...")
         time.sleep(3)
 
-        instance_selectors = [
+        inst_sels = [
             (By.XPATH, "//button[contains(text(),'ADD NEW INSTANCE')]"),
             (By.XPATH, "//button[contains(text(),'Add New Instance')]"),
             (By.XPATH, "//button[contains(text(),'Add new instance')]"),
             (By.XPATH, "//*[contains(text(),'ADD NEW INSTANCE')]"),
             (By.CSS_SELECTOR, "#newInstanceBtn"),
             (By.CSS_SELECTOR, "button[ng-click*='newInstance']"),
-            (By.CSS_SELECTOR, ".new-instance-btn"),
-            (By.XPATH, "//button[contains(@class,'instance')]"),
         ]
 
-        for attempt in range(5):
-            if self._find_and_click(instance_selectors, "Add Instance butonu"):
-                time.sleep(8)
-                self._screenshot("09_instance_olusturuldu")
-                self._log("  Instance olusturuldu!")
+        for attempt in range(6):
+            if self.find_click(inst_sels, "Add Instance"):
+                time.sleep(10)
+                self.snap("09_instance_ok")
+                self.log("  Instance olusturuldu!")
                 return
-            self._log(f"  Add Instance bekleniyor... deneme {attempt+1}")
+            self.log(f"  Instance bekleniyor... {attempt+1}")
             time.sleep(3)
 
-        self._screenshot("09_instance_bulunamadi")
-        raise Exception("Add New Instance butonu bulunamadi!")
+        self.snap("09_instance_yok")
+        raise Exception("Add Instance bulunamadi!")
 
-    # ------------------------------------------------------------------ #
-    #  ADIM 7: TERMINALE KOMUT YAZ VE CALISTIR
-    # ------------------------------------------------------------------ #
-    def _execute_command(self, command):
-        self._log("Terminal'e komut yaziliyor...")
-        time.sleep(3)
+    # ── adim 7 : komut calistir ──────────────────────────
 
-        # xterm.js terminal'ini bul
-        terminal_selectors = [
+    def step7_run_command(self, command):
+        self.log("Terminale komut yaziliyor...")
+        time.sleep(4)
+
+        terminal = None
+        term_sels = [
             (By.CSS_SELECTOR, ".xterm-helper-textarea"),
             (By.CSS_SELECTOR, "textarea.xterm-helper-textarea"),
             (By.CSS_SELECTOR, ".terminal textarea"),
-            (By.CSS_SELECTOR, ".xterm textarea"),
-            (By.CSS_SELECTOR, "#terminal textarea"),
         ]
-
-        terminal = None
-        for by, selector in terminal_selectors:
+        for by, sel in term_sels:
             try:
                 terminal = self.wait.until(
-                    EC.presence_of_element_located((by, selector))
+                    EC.presence_of_element_located((by, sel))
                 )
-                self._log(f"  Terminal bulundu: {selector}")
+                self.log("  Terminal bulundu")
                 break
             except TimeoutException:
                 continue
 
         if terminal is None:
-            # Fallback: Sayfadaki herhangi bir terminal alanina tikla
-            self._log("  Terminal textarea bulunamadi, alternatif yol deneniyor...")
+            self.log("  xterm-screen deneniyor...")
             try:
-                term_area = self.driver.find_element(
-                    By.CSS_SELECTOR, ".xterm-screen"
-                )
-                ActionChains(self.driver).click(term_area).perform()
+                scr = self.driver.find_element(By.CSS_SELECTOR, ".xterm-screen")
+                ActionChains(self.driver).click(scr).perform()
                 time.sleep(1)
                 terminal = self.driver.find_element(
                     By.CSS_SELECTOR, ".xterm-helper-textarea"
                 )
             except Exception:
-                self._screenshot("10_terminal_bulunamadi")
+                self.snap("10_terminal_yok")
                 raise Exception("Terminal bulunamadi!")
 
-        # Komutu satir satir gonder
-        lines = command.strip
+        lines = command.strip().split("\n")
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            self.log(f"  Komut [{i+1}/{len(lines)}]: {line[:70]}")
+            terminal.send_keys(line)
+            time.sleep(0.5)
+            terminal.send_keys(Keys.RETURN)
+            time.sleep(3)
+
+        self.snap("10_komut_ok")
+        self.log("  Komutlar gonderildi!")
+        time.sleep(15)
+        self.snap("11_sonuc")
+
+    # ── ANA RUN METODU ───────────────────────────────────
+
+    def run(self, email, password, command):
+        """Tek hesap icin tum adimlari calistir."""
+        self.label = email.split("@")[0] if "@" in email else email[:10]
+        success = False
+
+        try:
+            self.log("=" * 50)
+            self.log(f"BASLATILIYOR: {email}")
+            self.log("=" * 50)
+
+            self.setup_driver()
+            self.step1_goto_pwd()
+            self.step2_click_login()
+            self.step3_click_docker()
+            self.step4_docker_login(email, password)
+            self.step5_click_start()
+            self.step6_add_instance()
+            self.step7_run_command(command)
+
+            success = True
+            self.log(f"BASARILI: {email}")
+
+        except Exception as e:
+            self.log(f"HATA: {e}")
+            self.snap("HATA")
+            traceback.print_exc()
+
+        finally:
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except Exception:
+                    pass
+                self.driver = None
+
+        return success
