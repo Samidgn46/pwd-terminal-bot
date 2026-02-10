@@ -1,0 +1,91 @@
+name: PWD Automator
+
+# ═══════════════════════════════════════════════════
+#  ZAMANLI CALISTIRMA
+#  PWD oturumu 2 saat → her 2 saatte yenile
+#  Ayrica manuel tetikleme destegi var
+# ═══════════════════════════════════════════════════
+
+on:
+  # Zamanlayici (UTC saati!)
+  schedule:
+    # Her 3.5 saatte bir: 00:00, 03:30, 07:00, 10:30, 14:00, 17:30, 21:00
+    - cron: '0 0 * * *'
+    - cron: '00 2 * * *'
+    - cron: '00 4 * * *'
+    - cron: '00 6 * * *'
+    - cron: '00 8 * * *'
+    - cron: '00 10 * * *'
+    - cron: '00 12 * * *'
+    - cron: '00 14 * * *'
+    - cron: '00 16 * * *'
+    - cron: '00 18 * * *'
+    - cron: '00 20 * * *'
+    - cron: '00 22 * * *'
+
+  # Manuel tetikleme (telefondan GitHub'a girip "Run workflow" tiklayarak)
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Calistirilacak komut (bos birakilirsa command.txt kullanilir)'
+        required: false
+        default: ''
+
+jobs:
+  automate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # 1. Kodu cek
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Python kur
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 3. Chrome kur
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: 'stable'
+
+      # 4. ChromeDriver kur
+      - name: Setup ChromeDriver
+        uses: nanasess/setup-chromedriver@v2
+
+      # 5. Python paketlerini kur
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      # 6. Accounts config olustur (Secrets'tan)
+      - name: Create config from secrets
+        run: |
+          echo '${{ secrets.ACCOUNTS_JSON }}' > accounts.json
+
+      # 7. Komutu ayarla (manuel input varsa)
+      - name: Set command
+        if: github.event.inputs.command != ''
+        run: |
+          echo '${{ github.event.inputs.command }}' > command.txt
+
+      # 8. Botu calistir
+      - name: Run PWD Automator
+        env:
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          COMMAND: ${{ secrets.COMMAND }}
+        run: |
+          python main.py --env
+
+      # 9. Screenshot'lari kaydet (debug icin)
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ github.run_number }}
+          path: screenshots/
+          retention-days: 3
