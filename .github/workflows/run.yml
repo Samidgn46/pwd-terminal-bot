@@ -1,33 +1,24 @@
 name: PWD Automator
 
-# ═══════════════════════════════════════════════════
-#  ZAMANLI CALISTIRMA
-#  PWD oturumu 2 saat → her 2 saatte yenile
-#  Ayrica manuel tetikleme destegi var
-# ═══════════════════════════════════════════════════
-
 on:
-  # Zamanlayici (UTC saati!)
   schedule:
-    # Her 3.5 saatte bir: 00:00, 03:30, 07:00, 10:30, 14:00, 17:30, 21:00
     - cron: '0 0 * * *'
-    - cron: '00 2 * * *'
-    - cron: '00 4 * * *'
-    - cron: '00 6 * * *'
-    - cron: '00 8 * * *'
-    - cron: '00 10 * * *'
-    - cron: '00 12 * * *'
-    - cron: '00 14 * * *'
-    - cron: '00 16 * * *'
-    - cron: '00 18 * * *'
-    - cron: '00 20 * * *'
-    - cron: '00 22 * * *'
-
-  # Manuel tetikleme (telefondan GitHub'a girip "Run workflow" tiklayarak)
+    - cron: '0 2 * * *'
+    - cron: '0 4 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 8 * * *'
+    - cron: '0 10 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 14 * * *'
+    - cron: '0 16 * * *'
+    - cron: '0 18 * * *'
+    - cron: '0 20 * * *'
+    - cron: '0 22 * * *'
+    
   workflow_dispatch:
     inputs:
       command:
-        description: 'Calistirilacak komut (bos birakilirsa command.txt kullanilir)'
+        description: 'Calistirilacak komut (bos = command.txt)'
         required: false
         default: ''
 
@@ -37,51 +28,44 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # 1. Kodu cek
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Python kur
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # 3. Chrome kur
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: 'stable'
 
-      # 4. ChromeDriver kur
       - name: Setup ChromeDriver
         uses: nanasess/setup-chromedriver@v2
 
-      # 5. Python paketlerini kur
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      # 6. Accounts config olustur (Secrets'tan)
-      - name: Create config from secrets
-        run: |
-          echo '${{ secrets.ACCOUNTS_JSON }}' > accounts.json
-
-      # 7. Komutu ayarla (manuel input varsa)
-      - name: Set command
+      - name: Set command from input
         if: github.event.inputs.command != ''
-        run: |
-          echo '${{ github.event.inputs.command }}' > command.txt
+        run: echo '${{ github.event.inputs.command }}' > command.txt
 
-      # 8. Botu calistir
       - name: Run PWD Automator
         env:
-          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          ACCOUNT_1_EMAIL: ${{ secrets.ACCOUNT_1_EMAIL }}
+          ACCOUNT_1_PASSWORD: ${{ secrets.ACCOUNT_1_PASSWORD }}
+          ACCOUNT_2_EMAIL: ${{ secrets.ACCOUNT_2_EMAIL }}
+          ACCOUNT_2_PASSWORD: ${{ secrets.ACCOUNT_2_PASSWORD }}
+          ACCOUNT_3_EMAIL: ${{ secrets.ACCOUNT_3_EMAIL }}
+          ACCOUNT_3_PASSWORD: ${{ secrets.ACCOUNT_3_PASSWORD }}
+          ACCOUNT_4_EMAIL: ${{ secrets.ACCOUNT_4_EMAIL }}
+          ACCOUNT_4_PASSWORD: ${{ secrets.ACCOUNT_4_PASSWORD }}
+          ACCOUNT_5_EMAIL: ${{ secrets.ACCOUNT_5_EMAIL }}
+          ACCOUNT_5_PASSWORD: ${{ secrets.ACCOUNT_5_PASSWORD }}
           COMMAND: ${{ secrets.COMMAND }}
-        run: |
-          python main.py --env
+        run: python main.py --env
 
-      # 9. Screenshot'lari kaydet (debug icin)
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
