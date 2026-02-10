@@ -1,0 +1,31 @@
+{
+  "command_file": "command.txt",
+  "schedule_interval_hours": 3.5,
+  "accounts": [
+    {
+      "email": "hesap1@mail.com",
+      "password": "sifre1",
+      "enabled": true
+    },
+    {
+      "email": "hesap2@mail.com",
+      "password": "sifre2",
+      "enabled": true
+    },
+    {
+      "email": "hesap3@mail.com",
+      "password": "sifre3",
+      "enabled": true
+    },
+    {
+      "email": "hesap4@mail.com",
+      "password": "sifre4",
+      "enabled": true
+    },
+    {
+      "email": "hesap5@mail.com",
+      "password": "sifre5",
+      "enabled": true
+    }
+  ]
+}
